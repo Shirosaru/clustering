@@ -34,23 +34,22 @@ def kmer_encoding(sequence, k=3, kmer_set=None):
 #get sequence from somewhere like the following
 #https://opig.stats.ox.ac.uk/webapps/plabdab/
 
-df = pd.read_csv('sanitized_sequences.csv')
+#df = pd.read_csv('sanitized_sequences.csv')
+# Load the sequences (assumed to be in 'paired_sequences.csv')
+df = pd.read_csv('paired_sequences.csv')
 
-
-# Step 2: Initialize the ablang2 model
+# Initialize the ablang2 model
 ablang = ablang2.pretrained(model_to_use='ablang2-paired', random_init=False, ncpu=12, device='cuda')
 
-# Step 3: Prepare antibody sequences from the CSV
+# Prepare antibody sequences from the CSV
 heavy_sequences = df['heavy_sequence'].tolist()
 light_sequences = df['light_sequence'].tolist()
 
-# Function to sanitize sequences by replacing invalid characters 'B' and 'Z' with 'A'
-# Should test with X as well. A might be better with other letters like X 
-# Or they may as well have * in them to get replaced with ablang2
+# Function to sanitize sequences by replacing invalid characters 'B' and 'Z' with '*'
 def sanitize_sequence(seq):
-    # Replace 'B' and 'Z' with 'A'
-    seq = seq.replace('B', 'A')
-    seq = seq.replace('Z', 'A')
+    # Replace 'B' and 'Z' with '*'
+    seq = seq.replace('B', '*')
+    seq = seq.replace('Z', '*')
     return seq
 
 # Check function to verify that no 'B' or 'Z' remain in the sequence
@@ -62,7 +61,7 @@ def check_invalid_characters(sequences):
             print(f"Invalid characters found in sequence: {seq}")
     return invalid_found
 
-# Step 4: Sanitize the sequences to remove any invalid characters
+# Step 4: Sanitize the sequences to replace 'B' and 'Z' with '*'
 sanitized_heavy_sequences = [sanitize_sequence(seq) for seq in heavy_sequences]
 sanitized_light_sequences = [sanitize_sequence(seq) for seq in light_sequences]
 
@@ -73,28 +72,32 @@ else:
     print("All sequences have been sanitized successfully.")
 
 
-# Print sanitized sequences for debugging
-#print("Sanitized Heavy Sequences:", sanitized_heavy_sequences)
-#print("Sanitized Light Sequences:", sanitized_light_sequences)
+# The format requires | to separate the VH and VL
+#seqs = [f"{heavy}|{light}" for heavy, light in zip(sanitized_heavy_sequences, sanitized_light_sequences)]
+seqs = [[heavy, light] for heavy, light in zip(sanitized_heavy_sequences, sanitized_light_sequences)]
+#print(seqs)
 
-# Step 6: Save sanitized sequences as a new CSV file
-sanitized_df = pd.DataFrame({
-    'heavy_sequence': sanitized_heavy_sequences,
-    'light_sequence': sanitized_light_sequences
+# Step 6: Use the ablang2 restore function to restore the sequences
+restored_sequences = [ablang(seq, mode='restore') for seq in seqs]
+
+# Step 4: Save restored sequences as a new CSV file
+restored_df = pd.DataFrame({
+    'restored_sequence': restored_sequences,
 })
 
-# Save to CSV
-sanitized_df.to_csv('sanitized_sequences.csv', index=False)
+# Save the restored sequences to a new CSV file
+restored_df.to_csv('restored_sequences.csv', index=False)
 
 # Step 6: Tokenize the sanitized sequences using ablang2 tokenizer
-# The format requires | to separate the VH and VL
-seqs = [f"{heavy}|{light}" for heavy, light in zip(sanitized_heavy_sequences, sanitized_light_sequences)]
 
 # Print the sequences that will be tokenized for debugging
 #print("Sequences to be tokenized:", seqs)
 
+
+#seqs = [f"{heavy}|{light}" for heavy, light in zip(sanitized_heavy_sequences, sanitized_light_sequences)]
+
 # Tokenize the sequences
-tokenized_seq = ablang.tokenizer(seqs, pad=True, w_extra_tkns=False, device="cuda")
+tokenized_seq = ablang.tokenizer(restored_sequences, pad=True, w_extra_tkns=False, device="cuda")
 # Step 5: Generate k-mers (k=3) from both the heavy and light sequences
 k = 3
 all_kmers = set()
@@ -120,6 +123,7 @@ def kmer_encoding(seq, k, kmer_set):
         if kmer in kmer_set:
             kmer_vector[kmer_set[kmer]] = 1
     return kmer_vector
+
 
 # Step 5: Encode all sequences into k-mer vectors using the fixed k-mer set
 sequence_vectors = np.array([kmer_encoding(seq, k=k, kmer_set=kmer_set) for seq in sanitized_heavy_sequences + sanitized_light_sequences])
